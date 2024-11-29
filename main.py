@@ -1,5 +1,9 @@
 import gradio as gr
 import base64
+import requests
+
+# LLM 서버 URL
+# LLM_SERVER_URL = "http://배포한주소.com"
 
 # 파일 업로드 처리 기능 정의
 def handle_file_upload(files):
@@ -33,14 +37,48 @@ def chatbot(message, chat_history, file_contents):
     pdf_files = [file for file in file_contents if file['type'] == 'pdf'] # PDF 파일 여부 확인
     image_files = [file for file in file_contents if file['type'] == 'image'] # 이미지 파일 여부
 
-    if pdf_files and image_files:  # PDF 파일 업로드, 이미지 파일 업르드 된 경우
-        response = f"Chatbot (RAG) PDF file(s): {[file['name'] for file in pdf_files]} and Images file(s): {len(image_files)}: 챗봇 응답.."
-    elif pdf_files: # PDF 파일만 업로드된 경우
-        response = f"Chatbot (RAG) PDF file(s): {[file['name'] for file in pdf_files]}: 챗봇 응답.."
-    elif image_files:  # 이미지 파일만 업로드된 경우
-        response = f"Chatbot Images file(s): {len(image_files)}: 챗봇 응답.."
-    else:  # 파일이 업로드되지 않은 경우
-        response = "Chatbot: 챗봇 응답.."
+    try:
+        if pdf_files and image_files:  # PDF 파일 업로드, 이미지 파일 업르드 된 경우
+            data = {
+                "message": message,
+                "pdf_files": pdf_files,
+                "image_files": image_files,
+                "chat_history": chat_history,
+            }
+
+            # response = requests.post(LLM_SERVER_URL, json=data) # 서버 요청
+            # response_data = response.json()  # 서버 응답 데이터
+            # response = responst_data["response"] # LLM 서버 응답
+        elif pdf_files: # PDF 파일만 업로드된 경우
+            data = {
+                "message": message,
+                "pdf_files": pdf_files,
+                "chat_history": chat_history,
+            }
+
+            # response = requests.post(LLM_SERVER_URL, json=data) # 서버 요청
+            # response_data = response.json()  # 서버 응답 데이터
+            # response = responst_data["response"] # LLM 서버 응답
+        elif image_files: # 이미지 파일만 업로드된 경우
+            data = {
+                "message": message,
+                "image_files": image_files,
+                "chat_history": chat_history,
+            }
+
+            # response = requests.post(LLM_SERVER_URL, json=data) # 서버 요청
+            # response_data = response.json()  # 서버 응답 데이터
+            # response = responst_data["response"] # LLM 서버 응답
+        else: # 파일이 업로드되지 않은 경우
+            data = {
+                "message": message,
+                "chat_history": chat_history,
+            }
+            # response = requests.post(LLM_SERVER_URL, json=data) # 서버 요청
+            # response_data = response.json()  # 서버 응답 데이터
+            # response = responst_data["response"] # LLM 서버 응답
+    except Exception as e:
+        response = f"LLM server 통신 에러: {e}"
 
     # 대화 기록에 사용자 메시지와 챗봇 응답 추가
     chat_history.append({"role": "user", "content": message})
