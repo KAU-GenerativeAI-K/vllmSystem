@@ -4,6 +4,7 @@ from openai import OpenAI
 from pdf_processing import process_pdf_and_create_index
 from faiss_search import load_faiss_index, load_chunks, search_top_k_with_context
 from sentence_transformers import SentenceTransformer
+import os
 
 # OpenAI Client 설정
 client = OpenAI(
@@ -19,21 +20,49 @@ MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # 파일 업로드 처리
 def handle_file_upload(files):
     if not files:
-        return []
+        return [], [] # 항상 2 개의 값을 반환
 
     file_contents = []
+    uploaded_images = []  # 업로드된 이미지를 표시하기 위한 리스트
+    
+    # 디렉토리 생성 확인
+    os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
+
     for file in files:
         if file.name.lower().endswith(".pdf"):
             # PDF 처리 및 인덱스 생성
             process_pdf_and_create_index(file, INDEX_PATH, CHUNK_PATH)
             file_contents.append({"type": "pdf", "name": file.name})
         elif file.name.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
+            uploaded_images.append(file)
             with open(file.name, "rb") as image_file:
                 encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
             file_contents.append({"type": "image", "name": file.name, "content": encoded_image})
         else:
             file_contents.append({"type": "unsupported", "name": file.name})
-    return file_contents
+    return file_contents, uploaded_images
+
+# 파일 삭제 처리
+def handle_file_delete(file_names, file_contents):
+    if not file_names:
+        file_names = []
+    if not file_contents:
+        file_contents = []
+        
+    updated_file_contents = [
+        file for file in file_contents if file['name'] not in file_names
+    ]
+    updated_uploaded_images = [
+        file['name'] for file in updated_file_contents if file['type'] == 'image'
+    ]
+    return updated_file_contents, updated_uploaded_images
+
+# 채팅 히스토리 및 파일 초기화 처리
+def reset_chat(file_contents):
+    file_contents = []  # 파일 초기화
+    chat_history = []   # 채팅 히스토리 초기화
+    uploaded_files = None  # 업로드된 파일 상태 초기화
+    return chat_history, file_contents, [], uploaded_files
 
 # 챗봇 기능 정의
 def chatbot(message, chat_history, file_contents):
@@ -102,6 +131,7 @@ with gr.Blocks(title="팀K Q&A 시스템") as demo:
     gr.Markdown("# 팀K Q&A 시스템")
 
     file_contents = gr.State([])
+    chat_history = gr.State([])
 
     with gr.Row():
         with gr.Column(scale=3):
@@ -110,18 +140,35 @@ with gr.Blocks(title="팀K Q&A 시스템") as demo:
             send_button = gr.Button("Send")
         with gr.Column(scale=1):
             upload_button = gr.File(label="Upload Files", file_types=[".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif"], file_count="multiple")
-            file_output = gr.Textbox(label="Uploaded Files Info", interactive=False)
+            uploaded_images_ui = gr.Gallery(label="Uploaded Images", columns=1)  # 업로드된 이미지를 표시할 갤러리 추가
+            reset_button = gr.Button("Reset Chat") 
 
+    # 파일 업로드 이벤트
     upload_button.change(
         handle_file_upload,
         inputs=upload_button,
-        outputs=file_contents
+        outputs=[file_contents, uploaded_images_ui]  # 이미지 UI와 파일 내용을 출력
+    )
+
+    # 파일 삭제 이벤트
+    upload_button.clear(
+        handle_file_delete,
+        inputs=[upload_button, file_contents],
+        outputs=[file_contents, uploaded_images_ui]
     )
     
+    # 메세지 전송 이벤트
     send_button.click(
         chatbot,
         inputs=[user_message, chatbot_ui, file_contents],
         outputs=[user_message, chatbot_ui]
+    )
+
+    # 초기화 버튼 이벤트
+    reset_button.click(
+        reset_chat,
+        inputs=[file_contents],
+        outputs=[chatbot_ui, file_contents, uploaded_images_ui, upload_button]
     )
 
 demo.launch()
