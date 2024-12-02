@@ -27,33 +27,31 @@ def clear_vector_db():
         print("vectorDB 디렉토리가 삭제되었습니다.")
 
 # 파일 업로드 처리
-def handle_file_upload(files):
-    if not files:
-        return [], []  # 항상 2 개의 값을 반환
-
-    file_contents = []
-    uploaded_images = []  # 업로드된 이미지를 표시하기 위한 리스트
-    pdf_files = []  # PDF 파일만 모아 처리할 리스트
+def handle_file_upload(files, file_contents):
+    """파일 업로드 시 파일 내용을 업데이트"""
+    updated_file_contents = []
+    uploaded_images = []
+    pdf_files = []
 
     os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
 
     for file in files:
         if file.name.lower().endswith(".pdf"):
             pdf_files.append(file)
-            file_contents.append({"type": "pdf", "name": file.name})
+            updated_file_contents.append({"type": "pdf", "name": file.name})
         elif file.name.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
             uploaded_images.append(file)
             with open(file.name, "rb") as image_file:
                 encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
-            file_contents.append({"type": "image", "name": file.name, "content": encoded_image})
+            updated_file_contents.append({"type": "image", "name": file.name, "content": encoded_image})
         else:
-            file_contents.append({"type": "unsupported", "name": file.name})
+            updated_file_contents.append({"type": "unsupported", "name": file.name})
 
-    # PDF 파일 처리 및 인덱스 생성
+    # PDF 처리 (변경 없음)
     if pdf_files:
         process_pdfs_and_create_index(pdf_files, INDEX_PATH, CHUNK_PATH)
 
-    return file_contents, uploaded_images
+    return updated_file_contents, uploaded_images
 
 # 파일 삭제 처리
 def handle_file_delete(file_names, file_contents):
@@ -87,34 +85,32 @@ def retry_request(api_call, retries=3, delay=2):
 
 # 챗봇 기능 정의
 def chatbot(message, chat_history, file_contents):
+    """챗봇에서 최신 파일 정보를 반영하여 메시지를 생성"""
     pdf_files = [file for file in file_contents if file['type'] == 'pdf']
     image_files = [file for file in file_contents if file['type'] == 'image']
 
     try:
-        # 대화 기록 제한: 최근 10개의 메시지만 유지
         MAX_CONTEXT_LENGTH = 10
         truncated_history = chat_history[-MAX_CONTEXT_LENGTH:]
 
-        # 메시지 준비
         api_messages = [
             {"role": item["role"], "content": item["content"]}
             for item in truncated_history if "role" in item and "content" in item
         ]
         api_messages.append({"role": "user", "content": message})
 
-        if not pdf_files:  # PDF 파일이 없는 경우
-            if not image_files:  # 이미지 파일도 없는 경우
-                # 일반 질문에 대한 기본 답변
+        if not pdf_files:
+            if not image_files:
                 prompt = "you are a helpful assistant. 주의사항 : 한국어로만 답변할것."
                 api_messages.insert(0, {"role": "system", "content": prompt})
-            else:  # 이미지 파일만 있는 경우
+            else:
                 image_descriptions = "\n".join([f"이미지 파일: {img['name']}" for img in image_files])
                 prompt = (
                     "you are a helpful assistant. 주의사항 : 한국어로만 답변할것. "
                     "다음 이미지를 참고하여 질문에 답변하세요:\n" + image_descriptions
                 )
                 api_messages.insert(0, {"role": "system", "content": prompt})
-        else:  # PDF 파일이 있는 경우
+        else:
             index = load_faiss_index(INDEX_PATH)
             chunks = load_chunks(CHUNK_PATH)
             model = SentenceTransformer(MODEL_NAME)
@@ -126,16 +122,19 @@ def chatbot(message, chat_history, file_contents):
                 if image_files else ""
             )
             prompt = (
-                """사용자가 질문한 내용에 대해 답변을 생성해줘. 답변을 생성할 때는 다음의 조건을 반드시 따라야 해:
-                1. 질문과 가장 관련 있는 레퍼런스의 내용만 사용해.
-                2. 질문과 관련 없는 레퍼런스의 내용은 절대 사용하지 마.
-                3. 주어진 레퍼런스에 없는 내용은 절대 생성하지 마.
-                4. 답변은 반드시 한국어로 작성해야 해.
-                레퍼런스:""" + context + " 이미지파일:" + image_descriptions
+                """You are an AI that generates answers based strictly on the provided references. Follow these instructions when crafting your response:
+                1. Your answer must be based solely on the content of the provided references.
+                2. Do not generate any information that is not explicitly mentioned in the references.
+                3. If the references do not contain relevant information to the question, respond with: "The references do not contain this information."
+                4. The answer must be written in korean.
+                5. 반드시 한국어로 답변해야해.
+
+                Below are the provided references and the question:
+                References: """ + context + " Image Descriptions: " + image_descriptions
             )
+
             api_messages.insert(0, {"role": "system", "content": prompt})
 
-        # OpenAI API 호출
         response = retry_request(
             lambda: client.chat.completions.create(
                 messages=api_messages,
@@ -172,7 +171,7 @@ with gr.Blocks(title="팀K Q&A 시스템") as demo:
     # 파일 업로드 이벤트
     upload_button.change(
         handle_file_upload,
-        inputs=upload_button,
+        inputs=[upload_button, file_contents],
         outputs=[file_contents, uploaded_images_ui]
     )
 
@@ -182,7 +181,7 @@ with gr.Blocks(title="팀K Q&A 시스템") as demo:
         inputs=[upload_button, file_contents],
         outputs=[file_contents, uploaded_images_ui]
     )
-    
+
     # 메세지 전송 이벤트
     send_button.click(
         chatbot,
