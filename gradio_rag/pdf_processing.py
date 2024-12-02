@@ -42,11 +42,19 @@ def save_chunks(chunks, chunk_path="chunks.pkl"):
     with open(chunk_path, "wb") as f:
         pickle.dump(chunks, f)
 
-# PDF 처리 및 인덱스 생성 함수
-def process_pdf_and_create_index(pdf_file, index_path="faiss_index.bin", chunk_path="chunks.pkl"):
-    text = extract_text_from_pdf(pdf_file.name)
-    chunks = chunk_text(text, method="paragraph", chunk_size=3)
+# PDF 처리 및 인덱스 생성 함수 (여러 PDF를 하나로 통합)
+def process_pdfs_and_create_index(pdf_files, index_path="faiss_index.bin", chunk_path="chunks.pkl"):
+    combined_text = ""  # 모든 PDF의 텍스트를 저장할 문자열
+
+    # 각 PDF 파일의 텍스트 추출 후 결합
+    for pdf_file in pdf_files:
+        text = extract_text_from_pdf(pdf_file.name)
+        combined_text += text + "\n"  # 파일 간 구분을 위해 개행 추가
+
+    # 통합된 텍스트로 청킹 및 임베딩 수행
+    chunks = chunk_text(combined_text, method="paragraph", chunk_size=1)
     embeddings, _ = generate_embeddings(chunks)
     create_faiss_index(embeddings, index_path)
     save_chunks(chunks, chunk_path)
-    return "PDF 파일 처리 및 인덱스 생성 완료!"
+
+    return "모든 PDF 파일 처리 및 통합된 인덱스 생성 완료!"

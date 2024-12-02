@@ -1,10 +1,11 @@
 import gradio as gr
 import base64
 from openai import OpenAI
-from pdf_processing import process_pdf_and_create_index
+from pdf_processing import process_pdfs_and_create_index
 from faiss_search import load_faiss_index, load_chunks, search_top_k_with_context
 from sentence_transformers import SentenceTransformer
 import os
+import shutil
 
 # OpenAI Client 설정
 client = OpenAI(
@@ -16,22 +17,29 @@ client = OpenAI(
 INDEX_PATH = "vectorDB/faiss_index.bin"
 CHUNK_PATH = "vectorDB/chunks.pkl"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+VECTOR_DB_DIR = "vectorDB"
+
+# vectorDB 디렉토리 초기화 함수
+def clear_vector_db():
+    if os.path.exists(VECTOR_DB_DIR):
+        shutil.rmtree(VECTOR_DB_DIR)
+        print("vectorDB 디렉토리가 삭제되었습니다.")
 
 # 파일 업로드 처리
 def handle_file_upload(files):
     if not files:
-        return [], [] # 항상 2 개의 값을 반환
+        return [], []  # 항상 2 개의 값을 반환
 
     file_contents = []
     uploaded_images = []  # 업로드된 이미지를 표시하기 위한 리스트
+    pdf_files = []  # PDF 파일만 모아 처리할 리스트
     
     # 디렉토리 생성 확인
     os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
 
     for file in files:
         if file.name.lower().endswith(".pdf"):
-            # PDF 처리 및 인덱스 생성
-            process_pdf_and_create_index(file, INDEX_PATH, CHUNK_PATH)
+            pdf_files.append(file)
             file_contents.append({"type": "pdf", "name": file.name})
         elif file.name.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
             uploaded_images.append(file)
@@ -40,6 +48,11 @@ def handle_file_upload(files):
             file_contents.append({"type": "image", "name": file.name, "content": encoded_image})
         else:
             file_contents.append({"type": "unsupported", "name": file.name})
+
+    # PDF 파일 처리 및 인덱스 생성
+    if pdf_files:
+        process_pdfs_and_create_index(pdf_files, INDEX_PATH, CHUNK_PATH)
+
     return file_contents, uploaded_images
 
 # 파일 삭제 처리
@@ -94,7 +107,7 @@ def chatbot(message, chat_history, file_contents):
             index = load_faiss_index(INDEX_PATH)
             chunks = load_chunks(CHUNK_PATH)
             model = SentenceTransformer(MODEL_NAME)
-            search_results = search_top_k_with_context(index, message, model, chunks, k=5, context_range=1)
+            search_results = search_top_k_with_context(index, message, model, chunks, k=5, context_range=3)
             
             # 레퍼런스 기반 프롬프트 생성
             context = "\n".join([result[0] for result in search_results])
@@ -102,10 +115,17 @@ def chatbot(message, chat_history, file_contents):
                 "\n".join([f"이미지 파일: {img['name']}" for img in image_files])
                 if image_files else ""
             )
+
             prompt = (
-                "you are a helpful assistant. 레퍼런스를 기반으로 답변할것. "
-                "주의사항 : 한국어로만 답변할것.\n\nReferences:\n" + context + "\n" + image_descriptions
+                "사용자가 질문한 내용에 대해 답변을 생성해줘. 답변을 생성할 때는 다음의 조건을 반드시 따라야 해:\n"
+                "1. 질문과 가장 관련 있는 문서의 내용만 사용해.\n"
+                "2. 질문과 관련 없는 문서의 내용은 절대 사용하지 마.\n"
+                "3. 주어진 문서들에 없는 내용은 절대 생성하지 마.\n"
+                "4. 답변은 반드시 한국어로 작성해야 해.\n\n"
+                "문서내용: {context}"
+                "이미지파일: {image_descriptions}"
             )
+            
             messages = [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": message}
@@ -132,6 +152,7 @@ with gr.Blocks(title="팀K Q&A 시스템") as demo:
 
     file_contents = gr.State([])
     chat_history = gr.State([])
+    session_state = gr.State(value=None, delete_callback=clear_vector_db)
 
     with gr.Row():
         with gr.Column(scale=3):
