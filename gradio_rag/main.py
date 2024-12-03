@@ -10,7 +10,7 @@ import time
 
 # OpenAI Client 설정
 client = OpenAI(
-    base_url="https://2bbc-34-16-167-48.ngrok-free.app/v1",
+    base_url="https://f7f5-34-143-149-159.ngrok-free.app/v1",
     api_key="token-abc123",
 )
 
@@ -19,6 +19,7 @@ INDEX_PATH = "vectorDB/faiss_index.bin"
 CHUNK_PATH = "vectorDB/chunks.pkl"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 VECTOR_DB_DIR = "vectorDB"
+
 
 # vectorDB 디렉토리 초기화 함수
 def clear_vector_db():
@@ -108,13 +109,13 @@ def chatbot(message, chat_history, file_contents):
 
         if not pdf_files:
             if not image_files:
-                prompt = "you are a helpful assistant. 주의사항 : 한국어로만 답변할것."
+                prompt = "you are a helpful assistant."
                 api_messages.insert(0, {"role": "system", "content": prompt})
             else:
-                image_descriptions = "\n".join([f"이미지 파일: {img['name']}" for img in image_files])
+                image_descriptions = "\n".join([f"image file: {img['name']}" for img in image_files])
                 prompt = (
-                    "you are a helpful assistant. 주의사항 : 한국어로만 답변할것. "
-                    "다음 이미지를 참고하여 질문에 답변하세요:\n" + image_descriptions
+                    "you are a helpful assistant.\n"
+                    "Refer to the following image and answer questions:\n" + image_descriptions
                 )
                 api_messages.insert(0, {"role": "system", "content": prompt})
         else:
@@ -125,7 +126,7 @@ def chatbot(message, chat_history, file_contents):
 
             context = "\n\n".join([result[0] for result in search_results])
             image_descriptions = (
-                "\n".join([f"이미지 파일: {img['name']}" for img in image_files])
+                "\n".join([f"image file: {img['name']}" for img in image_files])
                 if image_files else ""
             )
             prompt = (
@@ -133,8 +134,6 @@ def chatbot(message, chat_history, file_contents):
                 1. Your answer must be based solely on the content of the provided references.
                 2. Do not generate any information that is not explicitly mentioned in the references.
                 3. If the references do not contain relevant information to the question, respond with: "The references do not contain this information."
-                4. The answer must be written in korean.
-                5. 반드시 한국어로 답변해야해.
 
                 Below are the provided references and the question:
                 References: """ + context + " Image Descriptions: " + image_descriptions
