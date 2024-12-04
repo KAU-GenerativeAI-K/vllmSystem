@@ -10,9 +10,12 @@ import time
 
 # OpenAI Client 설정
 client = OpenAI(
-    base_url="https://f7f5-34-143-149-159.ngrok-free.app/v1",
+    base_url="https://6b6e-35-185-179-250.ngrok-free.app/v1",
     api_key="token-abc123",
 )
+
+models = client.models.list()
+MODEL = models.data[0].id
 
 # RAG 시스템 설정
 INDEX_PATH = "vectorDB/faiss_index.bin"
@@ -20,12 +23,6 @@ CHUNK_PATH = "vectorDB/chunks.pkl"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 VECTOR_DB_DIR = "vectorDB"
 
-
-# vectorDB 디렉토리 초기화 함수
-def clear_vector_db():
-    if os.path.exists(VECTOR_DB_DIR):
-        shutil.rmtree(VECTOR_DB_DIR)
-        print("vectorDB 디렉토리가 삭제되었습니다.")
 
 # 파일 업로드 처리
 def handle_file_upload(files):
@@ -47,7 +44,9 @@ def handle_file_upload(files):
             uploaded_images.append(file)
             with open(file.name, "rb") as image_file:
                 encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
-            file_contents.append({"type": "image", "name": file.name, "content": encoded_image})
+                extension = os.path.splitext(file.name)[1][1:].lower() # os.path.splitext로 확장자를 안전하게 추출
+                image_url = f"data:image/{extension};base64,{encoded_image}"
+            file_contents.append({"type": "image", "name": file.name, "url": image_url})
         else:
             file_contents.append({"type": "unsupported", "name": file.name})
 
@@ -79,20 +78,8 @@ def reset_chat(file_contents):
     uploaded_files = None  # 업로드된 파일 상태 초기화
     return chat_history, file_contents, [], uploaded_files
 
-
-# 재시도 로직 추가
-def retry_request(api_call, retries=3, delay=2):
-    for i in range(retries):
-        try:
-            return api_call()
-        except Exception as e:
-            if i < retries - 1:
-                time.sleep(delay)
-            else:
-                raise e
-
 # 챗봇 기능 정의
-def chatbot(message, chat_history, file_contents):
+def chatbot(query, chat_history, file_contents):
     """챗봇에서 최신 파일 정보를 반영하여 메시지를 생성"""
     pdf_files = [file for file in file_contents if file['type'] == 'pdf']
     image_files = [file for file in file_contents if file['type'] == 'image']
@@ -101,61 +88,205 @@ def chatbot(message, chat_history, file_contents):
         MAX_CONTEXT_LENGTH = 4
         truncated_history = chat_history[-MAX_CONTEXT_LENGTH:]
 
-        api_messages = [
-            {"role": item["role"], "content": item["content"]}
-            for item in truncated_history if "role" in item and "content" in item
-        ]
-        api_messages.append({"role": "user", "content": message})
-
         if not pdf_files:
             if not image_files:
-                prompt = "you are a helpful assistant."
-                api_messages.insert(0, {"role": "system", "content": prompt})
-            else:
-                image_descriptions = "\n".join([f"image file: {img['name']}" for img in image_files])
-                prompt = (
-                    "you are a helpful assistant.\n"
-                    "Refer to the following image and answer questions:\n" + image_descriptions
+                messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                messages = [
+                    {"role": item["role"], "content": item["content"]}
+                    for item in truncated_history if "role" in item and "content" in item
+                    ]
+                messages.append({"role": "user", "content": query})
+
+                chat_response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
                 )
-                api_messages.insert(0, {"role": "system", "content": prompt})
+                response = chat_response.choices[0].message.content.strip()
+                chat_history.append({"role": "user", "content": query})
+                chat_history.append({"role": "assistant", "content": response})
+                return "", chat_history
+            else:
+                if len(image_files) == 1:
+                    # 이미지가 1개인 경우
+                    image_url = image_files[0]['url']
+
+                    # 히스토리를 메시지에 추가
+                    messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                    messages = [
+                        {"role": item["role"], "content": item["content"]}
+                        for item in truncated_history if "role" in item and "content" in item
+                        ]
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": query},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": image_url,
+                                },
+                            },
+                        ],
+                    })
+
+                    chat_response = client.chat.completions.create(
+                        model=MODEL,
+                        messages=messages,
+                    )
+                    response = chat_response.choices[0].message.content.strip()
+                    chat_history.append({"role": "user", "content": query})
+                    chat_history.append({"role": "assistant", "content": response})
+                    return "", chat_history
+                else:
+                    responses = []  # 여러 개의 이미지에 대한 응답을 저장할 리스트
+                    # 이미지가 여러 개인 경우
+                    for img in image_files:
+                        image_url = img['url']
+                        chat_response = client.chat.completions.create(
+                            model=MODEL,
+                            messages=[{
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Describe the image in detail."},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": image_url,
+                                        },
+                                    },
+                                ],
+                            }],
+                        )
+                        responses.append(chat_response.choices[0].message.content.strip())
+
+                    # 이미지 설명과 사용자 질문을 결합
+                    combined_context = "Here are the detailed descriptions of the images:\n"
+                    for i, response in enumerate(responses, start=1):
+                        combined_context += f"Image {i}: {response}\n"
+
+                    combined_context = f"User's question: {query}\n" + combined_context
+
+
+                    # 히스토리를 메시지에 추가
+                    messages = [{"role": "system", "content": "You are a multimodal assistant. Use the image descriptions to answer the user's question."}]
+                    messages = [
+                        {"role": item["role"], "content": item["content"]}
+                        for item in truncated_history if "role" in item and "content" in item
+                        ]
+                    messages.append({"role": "user", "content": combined_context})
+
+                    chat_response = client.chat.completions.create(
+                        model=MODEL,
+                        messages=messages,
+                    )
+                    response = chat_response.choices[0].message.content.strip()
+                    chat_history.append({"role": "user", "content": query})
+                    chat_history.append({"role": "assistant", "content": response})
+                    return "", chat_history
         else:
             index = load_faiss_index(INDEX_PATH)
             chunks = load_chunks(CHUNK_PATH)
             model = SentenceTransformer(MODEL_NAME)
-            search_results = search_top_k_with_context(index, message, model, chunks, k=5, context_range=3)
+            search_results = search_top_k_with_context(index, query, model, chunks, k=5, context_range=3)
 
             context = "\n\n".join([result[0] for result in search_results])
-            image_descriptions = (
-                "\n".join([f"image file: {img['name']}" for img in image_files])
-                if image_files else ""
-            )
-            prompt = (
-                """You are an AI that generates answers based strictly on the provided references. Follow these instructions when crafting your response:
+            if not image_files:
+                prompt = """
+                You are an AI that generates answers exclusively based on the provided references. Follow these instructions when crafting your response:
+
                 1. Your answer must be based solely on the content of the provided references.
-                2. Do not generate any information that is not explicitly mentioned in the references.
-                3. If the references do not contain relevant information to the question, respond with: "The references do not contain this information."
+                2. Do not infer or generate any information that is not explicitly stated in the references.
+                3. If the references do not contain relevant information to answer the question, respond with: "The references do not contain this information.
+                """
 
-                Below are the provided references and the question:
-                References: """ + context + " Image Descriptions: " + image_descriptions
-            )
+                user_query =f"""
+                Below are the references and the user's question:
+                references:
+                {context}
 
-            api_messages.insert(0, {"role": "system", "content": prompt})
+                Question:
+                {query}
+                """
 
-        response = retry_request(
-            lambda: client.chat.completions.create(
-                messages=api_messages,
-                model="mistralai/Mistral-7B-Instruct-v0.2"
-            )
-        )
-        bot_response = response.choices[0].message.content
-        chat_history.append({"role": "user", "content": message})
-        chat_history.append({"role": "assistant", "content": bot_response})
+                messages = [{"role": "system", "content": prompt}]
+                messages = [
+                    {"role": item["role"], "content": item["content"]}
+                    for item in truncated_history if "role" in item and "content" in item
+                    ]
+                messages.append({"role": "user", "content": user_query})
+
+                chat_response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
+                )
+                response = chat_response.choices[0].message.content.strip()
+                chat_history.append({"role": "user", "content": query})
+                chat_history.append({"role": "assistant", "content": response})
+                return "", chat_history
+            else:
+                responses = []  # 여러 개의 이미지에 대한 응답을 저장할 리스트
+                for img in image_files:
+                    image_url = img['url']
+                    chat_response = client.chat.completions.create(
+                        model=MODEL,
+                        messages=[{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Describe the image in detail."},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": image_url,
+                                    },
+                                },
+                            ],
+                        }],
+                    )
+                    responses.append(chat_response.choices[0].message.content.strip())
+
+                # 이미지 설명과 사용자 질문을 결합
+                combined_context = "Here are the detailed descriptions of the images:\n"
+                for i, response in enumerate(responses, start=1):
+                    combined_context += f"Image {i}: {response}\n"
+
+                prompt = """
+                You are an AI that generates answers exclusively based on the provided references. Follow these instructions when crafting your response:
+
+                1. Your answer must be based solely on the content of the provided references.
+                2. Do not infer or generate any information that is not explicitly stated in the references.
+                3. If the references do not contain relevant information to answer the question, respond with: "The references do not contain this information.
+                """
+
+                user_query =f"""
+                Below are the references and the user's question:
+                references:
+                {context}
+
+                image_references:
+                {combined_context}
+
+                Question:
+                {query}
+                """
+
+                messages = [{"role": "system", "content": prompt}]
+                messages = [
+                    {"role": item["role"], "content": item["content"]}
+                    for item in truncated_history if "role" in item and "content" in item
+                    ]
+                messages.append({"role": "user", "content": user_query})
+
+                chat_response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
+                )
+                response = chat_response.choices[0].message.content.strip()
+                chat_history.append({"role": "user", "content": query})
+                chat_history.append({"role": "assistant", "content": response})
+                return "", chat_history
 
     except Exception as e:
-        bot_response = f"LLM 서버 통신 에러: {e}"
-        chat_history.append({"role": "assistant", "content": bot_response})
-
-    return "", chat_history
+        return f"LLM 서버 통신 에러: {e}"
 
 # Gradio 앱 생성
 with gr.Blocks(title="팀K Q&A 시스템") as demo:
@@ -163,7 +294,6 @@ with gr.Blocks(title="팀K Q&A 시스템") as demo:
 
     file_contents = gr.State([])
     chat_history = gr.State([])
-    session_state = gr.State(value=None, delete_callback=clear_vector_db)
 
     with gr.Row():
         with gr.Column(scale=3):
