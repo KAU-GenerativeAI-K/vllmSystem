@@ -90,7 +90,7 @@ def chatbot(query, chat_history, file_contents):
 
         if not pdf_files:
             if not image_files:
-                messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                messages = [{"role": "system", "content": "You are a helpful assistant. Always respond in English, regardless of the language used by the user. Translate any non-English input to English and reply in English."}]
                 messages = [
                     {"role": item["role"], "content": item["content"]}
                     for item in truncated_history if "role" in item and "content" in item
@@ -111,7 +111,7 @@ def chatbot(query, chat_history, file_contents):
                     image_url = image_files[0]['url']
 
                     # 히스토리를 메시지에 추가
-                    messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                    messages = [{"role": "system", "content": "You are a helpful assistant. Always respond in English, regardless of the language used by the user. Translate any non-English input to English and reply in English."}]
                     messages = [
                         {"role": item["role"], "content": item["content"]}
                         for item in truncated_history if "role" in item and "content" in item
@@ -147,7 +147,7 @@ def chatbot(query, chat_history, file_contents):
                             messages=[{
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": "Describe the image in detail."},
+                                    {"type": "text", "text": "Describe the image in detail. Always respond in English."},
                                     {
                                         "type": "image_url",
                                         "image_url": {
@@ -168,7 +168,7 @@ def chatbot(query, chat_history, file_contents):
 
 
                     # 히스토리를 메시지에 추가
-                    messages = [{"role": "system", "content": "You are a multimodal assistant. Use the image descriptions to answer the user's question."}]
+                    messages = [{"role": "system", "content": "You are a multimodal assistant. Use the image descriptions to answer the user's question. Always respond in English."}]
                     messages = [
                         {"role": item["role"], "content": item["content"]}
                         for item in truncated_history if "role" in item and "content" in item
@@ -197,6 +197,7 @@ def chatbot(query, chat_history, file_contents):
                 1. Your answer must be based solely on the content of the provided references.
                 2. Do not infer or generate any information that is not explicitly stated in the references.
                 3. If the references do not contain relevant information to answer the question, respond with: "The references do not contain this information.
+                4. Always respond in English.
                 """
 
                 user_query =f"""
@@ -255,6 +256,7 @@ def chatbot(query, chat_history, file_contents):
                 1. Your answer must be based solely on the content of the provided references.
                 2. Do not infer or generate any information that is not explicitly stated in the references.
                 3. If the references do not contain relevant information to answer the question, respond with: "The references do not contain this information.
+                4. Always respond in English.
                 """
 
                 user_query =f"""

@@ -12,7 +12,7 @@ def load_chunks(chunk_path="chunks.pkl"):
         return pickle.load(f)
 
 # 검색 기능
-def search_top_k_with_context(index, query, model, chunks, k=5, context_range=3):
+def search_top_k_with_context(index, query, model, chunks, k=5, context_range=1):
     query_vector = model.encode([query], convert_to_numpy=True)
     distances, indices = index.search(query_vector, k)
 
